@@ -12,9 +12,8 @@ return [
     | as required, but they're a perfect start for most applications.
     |
     */
-
      'defaults' => [
-        'guard' => env('AUTH_GUARD', 'api'),
+        'guard' => env('AUTH_GUARD', 'sanctum'),
         'passwords' => env('AUTH_PASSWORD_BROKER', 'usuarios'),
     ],
 
@@ -41,20 +40,15 @@ return [
     */
 
     'guards' => [
-        'api' => [
-            'driver' => 'sanctum',
+        'web' => [
+            'driver'   => 'session',
+            'provider' => 'usuarios',
+        ],
+        'sanctum' => [
+            'driver'   => 'sanctum',
             'provider' => 'usuarios',
         ],
     ],
-
-
-    // 'guards' => [
-    //     'web' => [
-    //         'driver' => 'session',
-    //         'provider' => 'users',
-    //     ],
-    // ],
-
     /*
     |--------------------------------------------------------------------------
     | User Providers

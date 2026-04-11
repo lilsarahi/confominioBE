@@ -13,12 +13,11 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
-        // Protege rutss de la api
         $middleware->api(append: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
 
-        $middleware->validateCsrfTokens(except: ['*']); // API usa tokens, no CSRF cookies
+        $middleware->validateCsrfTokens(except: ['api/*']); // API usa tokens, no CSRF cookies
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);

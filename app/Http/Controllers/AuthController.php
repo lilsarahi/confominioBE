@@ -4,42 +4,39 @@ namespace App\Http\Controllers;
 use App\Models\Persona;
 use App\Models\Usuario;
 use App\Notifications\VerificarEmail;
-use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Foundation\Auth\EmailVerificationRequest;
+
 
 class AuthController extends Controller
 {
-    //Registrar
     public function register(Request $request)
     {
         $request->validate([
-            'nombre'      => 'required|string|max:100',
-            'apellido_p'  => 'required|string|max:100',
-            'apellido_m'  => 'required|string|max:100',
-            'celular'     => 'required|numeric',
-            'email'       => 'required|email|unique:personas,email',
-            'password'    => 'required|string|min:8|confirmed',
+            'nombre' => 'required|string|max:100',
+            'apellido_p' => 'required|string|max:100',
+            'apellido_m' => 'required|string|max:100',
+            'celular' => 'required|numeric',
+            'email' => 'required|email|unique:personas,email',
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
-        //Crear persona
         $persona = Persona::create([
-            'nombre'     => $request->nombre,
+            'nombre' => $request->nombre,
             'apellido_p' => $request->apellido_p,
             'apellido_m' => $request->apellido_m,
-            'celular'    => $request->celular,
-            'email'      => $request->email,
-            'activo'     => true,
+            'celular' => $request->celular,
+            'email' => $request->email,
+            'activo' => true,
         ]);
 
-        //Crear usuario
         $usuario = Usuario::create([
             'id_persona' => $persona->id,
-            'pass'       => Hash::make($request->password),
-            'admin'      => false,
+            'pass' => Hash::make($request->password),
+            'admin' => false,
         ]);
 
-        //Enviar correo de verificación
         $usuario->notify(new VerificarEmail());
 
         return response()->json([
@@ -47,34 +44,133 @@ class AuthController extends Controller
         ], 201);
     }
 
-    // Para verificar email
-    public function verifyEmail(Request $request, $id, $hash)
+    public function login(Request $request)
     {
-        $usuario = Usuario::findOrFail($id);
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string',
+            'dispositivo' => 'required|string|max:100',
+        ]);
 
-        if (!hash_equals(sha1($usuario->getEmailForVerification()), $hash)) {
-            return response()->json(['message' => 'Enlace de verificación inválido.'], 400);
+        // Buscar persona por email
+        $persona = Persona::where('email', $request->email)->first();
+
+        if (!$persona || !$persona->usuario) {
+            return response()->json(['message' => 'Credenciales incorrectas.'], 401);
         }
 
-        if ($usuario->hasVerifiedEmail()) {
-            return response()->json(['message' => 'El correo ya fue verificado.']);
+        $usuario = $persona->usuario;
+
+        // Verificar contraseña
+        if (!Hash::check($request->password, $usuario->pass)) {
+            return response()->json(['message' => 'Credenciales incorrectas.'], 401);
         }
 
-        $usuario->markEmailAsVerified();
+        // Verificar email confirmado
+        if (!$usuario->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Debes verificar tu correo electrónico antes de iniciar sesión.'], 403);
+        }
 
-        return response()->json(['message' => 'Correo verificado correctamente. Ya puedes iniciar sesión.']);
+        // Un token por dispositiv se elimina token anterior del mismo dispositivo si existe
+        $usuario->tokens()->where('name', $request->dispositivo)->delete();
+
+        // Crear nuevo token para este dispositivo
+        $token = $usuario->createToken($request->dispositivo)->plainTextToken;
+
+        // Cargar datos del usuario
+        $usuario->load('persona');
+
+        return response()->json([
+            'token' => $token,
+            'usuario' => [
+                'id' => $usuario->id,
+                'nombre_completo'=> $usuario->persona->nombre_completo,
+                'email' => $usuario->persona->email,
+                'celular' => (string) $usuario->persona->celular,
+                'admin' => $usuario->admin,
+                'roles' => $usuario->getRoles(),
+            ],
+        ]);
     }
+
+    public function logout(Request $request)
+    {
+        // Elimina solo el token del dispositivo actual
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json(['message' => 'Sesión cerrada correctamente.']);
+    }
+
+    public function cambiarPassword(Request $request)
+    {
+        $request->validate([
+            'password_actual' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $usuario = $request->user();
+
+        if (!Hash::check($request->password_actual, $usuario->pass)) {
+            return response()->json(['message' => 'La contraseña actual es incorrecta.'], 422);
+        }
+
+        // Actualizar contraseña
+        $usuario->update(['pass' => Hash::make($request->password)]);
+
+        // Cerrar sesión en TODOS los dispositivos
+        $usuario->tokens()->delete();
+
+        return response()->json(['message' => 'Contraseña actualizada. Por seguridad, se cerraron todas las sesiones activas.']);
+    }
+   
+
+    public function verifyEmail($id, $hash)
+{
+    $usuario = \App\Models\Usuario::findOrFail($id);
+
+    // Validar hash
+    if (!hash_equals(sha1($usuario->getEmailForVerification()), $hash)) {
+        return response()->json(['message' => 'Enlace inválido'], 400);
+    }
+
+    // Marcar como verificado si no lo está
+    if (!$usuario->hasVerifiedEmail()) {
+        $usuario->email_verified_at = now(); 
+        $usuario->save();
+    }
+
+    return response()->json([
+        'message' => 'Correo verificado correctamente. Ya puedes iniciar sesión.'
+    ]);
+}
+    // public function verifyEmail(Request $request, $id, $hash)
+    // {
+    //     $usuario = Usuario::findOrFail($id);
+
+    //     if (!hash_equals(sha1($usuario->getEmailForVerification()), $hash)) {
+    //         return response()->json(['message' => 'Enlace de verificación inválido.'], 400);
+    //     }
+
+    //     if ($usuario->hasVerifiedEmail()) {
+    //         return response()->json(['message' => 'El correo ya fue verificado.']);
+    //     }
+
+    //     $usuario->markEmailAsVerified();
+
+    //     return response()->json(['message' => 'Correo verificado correctamente. Ya puedes iniciar sesión.']);
+    // }
 
     public function resendVerification(Request $request)
     {
         $request->validate(['email' => 'required|email']);
 
-        $persona = Persona::where('email', $request->email)->firstOrFail();
-        $usuario = $persona->usuario;
+        $persona = Persona::where('email', $request->email)->first();
 
-        if (!$usuario) {
+        if (!$persona || !$persona->usuario) {
             return response()->json(['message' => 'Usuario no encontrado.'], 404);
         }
+
+        $usuario = $persona->usuario;
 
         if ($usuario->hasVerifiedEmail()) {
             return response()->json(['message' => 'El correo ya fue verificado.']);
@@ -83,5 +179,19 @@ class AuthController extends Controller
         $usuario->notify(new VerificarEmail());
 
         return response()->json(['message' => 'Correo de verificación reenviado.']);
+    }
+
+    public function me(Request $request)
+    {
+        $usuario = $request->user()->load('persona');
+
+        return response()->json([
+            'id' => $usuario->id,
+            'nombre_completo'=> $usuario->persona->nombre_completo,
+            'email' => $usuario->persona->email,
+            'celular' => (string) $usuario->persona->celular,
+            'admin' => $usuario->admin,
+            'roles' => $usuario->getRoles(),
+        ]);
     }
 }
