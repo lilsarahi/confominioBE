@@ -10,6 +10,10 @@ Route::post('/email/resend',                    [AuthController::class, 'resendV
 Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->name('verification.verify')
     ->middleware(['signed']);
+
+Route::post('/password/solicitar',  [AuthController::class, 'solicitarCodigo']);
+Route::post('/password/verificar',  [AuthController::class, 'verificarCodigo']);
+Route::post('/password/resetear',   [AuthController::class, 'resetearPassword']);
     
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
 

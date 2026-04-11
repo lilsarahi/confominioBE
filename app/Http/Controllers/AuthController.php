@@ -7,6 +7,8 @@ use App\Notifications\VerificarEmail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
+use App\Models\PasswordReset;
+use App\Notifications\RecuperarPassword;
 
 
 class AuthController extends Controller
@@ -143,22 +145,6 @@ class AuthController extends Controller
         'message' => 'Correo verificado correctamente. Ya puedes iniciar sesión.'
     ]);
 }
-    // public function verifyEmail(Request $request, $id, $hash)
-    // {
-    //     $usuario = Usuario::findOrFail($id);
-
-    //     if (!hash_equals(sha1($usuario->getEmailForVerification()), $hash)) {
-    //         return response()->json(['message' => 'Enlace de verificación inválido.'], 400);
-    //     }
-
-    //     if ($usuario->hasVerifiedEmail()) {
-    //         return response()->json(['message' => 'El correo ya fue verificado.']);
-    //     }
-
-    //     $usuario->markEmailAsVerified();
-
-    //     return response()->json(['message' => 'Correo verificado correctamente. Ya puedes iniciar sesión.']);
-    // }
 
     public function resendVerification(Request $request)
     {
@@ -194,4 +180,114 @@ class AuthController extends Controller
             'roles' => $usuario->getRoles(),
         ]);
     }
+
+    // Solicitar código
+    public function solicitarCodigo(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $persona = Persona::where('email', $request->email)->first();
+
+        if (!$persona || !$persona->usuario) {
+            return response()->json([
+                'message' => 'Si el correo existe, recibirás un código en breve.',
+            ]);
+        }
+
+        $usuario = $persona->usuario;
+
+        if (!$usuario->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'Debes verificar tu correo antes de recuperar tu contraseña.',
+            ], 403);
+        }
+
+        PasswordReset::where('email', $request->email)->delete();
+
+        // Generar código de 6 dígitos
+        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        PasswordReset::create([
+            'email'      => $request->email,
+            'code'       => $code,
+            'expires_at' => now()->addMinutes(15),
+            'used'       => false,
+        ]);
+
+        $usuario->notify(new RecuperarPassword($code));
+
+        return response()->json([
+            'message' => 'Si el correo existe, recibirás un código en breve.',
+        ]);
+    }
+
+    // Verificsr código
+    public function verificarCodigo(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'code'  => 'required|string|size:6',
+        ]);
+
+        $registro = PasswordReset::where('email', $request->email)
+            ->where('code', $request->code)
+            ->where('used', false)
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if (!$registro) {
+            return response()->json([
+                'message' => 'El código es inválido o ha expirado.',
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Código válido.',
+        ]);
+    }
+
+    // Resetear contraseña
+    public function resetearPassword(Request $request)
+    {
+        $request->validate([
+            'email'    => 'required|email',
+            'code'     => 'required|string|size:6',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $registro = PasswordReset::where('email', $request->email)
+            ->where('code', $request->code)
+            ->where('used', false)
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if (!$registro) {
+            return response()->json([
+                'message' => 'El código es inválido o ha expirado.',
+            ], 422);
+        }
+
+        $persona = Persona::where('email', $request->email)->first();
+        $usuario = $persona?->usuario;
+
+        if (!$usuario) {
+            return response()->json(['message' => 'Usuario no encontrado.'], 404);
+        }
+
+        // Actualizar contraseña
+        $usuario->update(['pass' => Hash::make($request->password)]);
+
+        // Cerrar todas las sesiones 
+        $usuario->tokens()->delete();
+
+        // Eliminar el código usado
+        $registro->delete();
+
+        return response()->json([
+            'message' => 'Contraseña restablecida correctamente. Ya puedes iniciar sesión.',
+        ]);
+    }
+
 }
