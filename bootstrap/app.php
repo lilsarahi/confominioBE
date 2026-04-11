@@ -17,7 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
 
-        $middleware->validateCsrfTokens(except: ['api/*']); // API usa tokens, no CSRF cookies
+        $middleware->validateCsrfTokens(except: ['api/*']); 
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);
